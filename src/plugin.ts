@@ -247,7 +247,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         return openAIError(500, "This provider requires Bun runtime.");
       }
 
-      const cmd = [
+      const baseCmd = [
         "cursor-agent",
         "--print",
         "--trust",
@@ -258,30 +258,61 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         "--model",
         selectedModel,
       ];
+      const spawnWithArgv = () => {
+        const cmd = [...baseCmd, effectivePrompt];
+        const child = bunAny.Bun.spawn({
+          cmd,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: bunAny.Bun.env,
+        });
 
-      const child = bunAny.Bun.spawn({
-        cmd,
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env: bunAny.Bun.env,
-      });
-
-      const stdinWriter = async () => {
-        if (!child.stdin) {
-          return;
-        }
-
-        try {
-          await child.stdin.write(effectivePrompt);
-        } finally {
-          await child.stdin.end();
-        }
+        return {
+          child,
+          writeInput: async () => {},
+        };
       };
+
+      const spawnWithStdin = () => {
+        const child = bunAny.Bun.spawn({
+          cmd: baseCmd,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+          env: bunAny.Bun.env,
+        });
+
+        return {
+          child,
+          writeInput: async () => {
+            if (!child.stdin) {
+              return;
+            }
+
+            try {
+              await child.stdin.write(effectivePrompt);
+            } finally {
+              await child.stdin.end();
+            }
+          },
+        };
+      };
+
+      let child: any;
+      let writeInput: () => Promise<void>;
+      try {
+        ({ child, writeInput } = spawnWithArgv());
+      } catch (error) {
+        const code = (error as any)?.code;
+        if (code !== "E2BIG") {
+          throw error;
+        }
+        ({ child, writeInput } = spawnWithStdin());
+      }
 
       if (!stream) {
         const [stdoutText, stderrText] = await Promise.all([
-          stdinWriter(),
+          writeInput(),
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
         ]).then(([, stdout, stderr]) => [stdout, stderr]);
@@ -371,7 +402,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
               const interval = setInterval(heartbeat, 1000);
 
               const [stdoutText, stderrText] = await Promise.all([
-                stdinWriter(),
+                writeInput(),
                 new Response(child.stdout).text(),
                 new Response(child.stderr).text(),
               ]).then(([, stdout, stderr]) => [stdout, stderr]).finally(() => {
@@ -432,7 +463,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
             }
 
             // No tools: stream stdout as text deltas.
-            await stdinWriter();
+            await writeInput();
             const decoder = new TextDecoder();
             const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
 

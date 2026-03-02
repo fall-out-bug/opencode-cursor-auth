@@ -250,6 +250,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
       const cmd = [
         "cursor-agent",
         "--print",
+        "--trust",
         "--output-format",
         "text",
         "--workspace",

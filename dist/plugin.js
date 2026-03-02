@@ -196,6 +196,7 @@ async function ensureCursorProxyServer(workspaceDirectory) {
             const cmd = [
                 "cursor-agent",
                 "--print",
+                "--trust",
                 "--output-format",
                 "text",
                 "--workspace",

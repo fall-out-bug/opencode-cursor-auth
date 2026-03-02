@@ -168,8 +168,6 @@ function buildToolCallingPrompt(conversation: string, tools: ToolDef[], workspac
   ].join("\n");
 }
 
-const ARG_PROMPT_MAX_CHARS = 12000;
-
 function isE2BIGSpawnError(error: unknown): boolean {
   const code = (error as any)?.code;
   const message = String((error as any)?.message ?? error ?? "").toLowerCase();
@@ -311,21 +309,15 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         };
       };
 
-      const preferStdin = effectivePrompt.length > ARG_PROMPT_MAX_CHARS;
-
       let child: any;
       let writeInput: () => Promise<void>;
-      if (preferStdin) {
+      try {
         ({ child, writeInput } = spawnWithStdin());
-      } else {
-        try {
-          ({ child, writeInput } = spawnWithArgv());
-        } catch (error) {
-          if (!isE2BIGSpawnError(error)) {
-            throw error;
-          }
-          ({ child, writeInput } = spawnWithStdin());
+      } catch (error) {
+        if (isE2BIGSpawnError(error)) {
+          throw error;
         }
+        ({ child, writeInput } = spawnWithArgv());
       }
 
       if (!stream) {

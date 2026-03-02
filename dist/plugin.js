@@ -127,7 +127,6 @@ function buildToolCallingPrompt(conversation, tools, workspaceDirectory) {
         conversation,
     ].join("\n");
 }
-const ARG_PROMPT_MAX_CHARS = 12000;
 function isE2BIGSpawnError(error) {
     const code = error?.code;
     const message = String(error?.message ?? error ?? "").toLowerCase();
@@ -249,22 +248,16 @@ async function ensureCursorProxyServer(workspaceDirectory) {
                     },
                 };
             };
-            const preferStdin = effectivePrompt.length > ARG_PROMPT_MAX_CHARS;
             let child;
             let writeInput;
-            if (preferStdin) {
+            try {
                 ({ child, writeInput } = spawnWithStdin());
             }
-            else {
-                try {
-                    ({ child, writeInput } = spawnWithArgv());
+            catch (error) {
+                if (isE2BIGSpawnError(error)) {
+                    throw error;
                 }
-                catch (error) {
-                    if (!isE2BIGSpawnError(error)) {
-                        throw error;
-                    }
-                    ({ child, writeInput } = spawnWithStdin());
-                }
+                ({ child, writeInput } = spawnWithArgv());
             }
             if (!stream) {
                 const [stdoutText, stderrText] = await Promise.all([

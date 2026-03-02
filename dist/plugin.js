@@ -127,13 +127,21 @@ function buildToolCallingPrompt(conversation, tools, workspaceDirectory) {
         conversation,
     ].join("\n");
 }
-function isE2BIGSpawnError(error) {
-    const code = error?.code;
-    const message = String(error?.message ?? error ?? "").toLowerCase();
-    return (code === "E2BIG" ||
-        message.includes("e2big") ||
-        message.includes("argument list too long") ||
-        message.includes("posix_spawn"));
+function buildCursorSpawnEnv(source) {
+    const output = {};
+    for (const [key, value] of Object.entries(source)) {
+        if (typeof value !== "string" || value.length === 0)
+            continue;
+        if (key.startsWith("OPENCODE_"))
+            continue;
+        if (value.length > 8192)
+            continue;
+        output[key] = value;
+    }
+    if (!output.PATH && typeof source.PATH === "string") {
+        output.PATH = source.PATH;
+    }
+    return output;
 }
 function createChatCompletionResponse(model, content) {
     return {
@@ -212,26 +220,14 @@ async function ensureCursorProxyServer(workspaceDirectory) {
                 "--model",
                 selectedModel,
             ];
-            const spawnWithArgv = () => {
-                const cmd = [...baseCmd, effectivePrompt];
-                const child = bunAny.Bun.spawn({
-                    cmd,
-                    stdout: "pipe",
-                    stderr: "pipe",
-                    env: bunAny.Bun.env,
-                });
-                return {
-                    child,
-                    writeInput: async () => { },
-                };
-            };
+            const spawnEnv = buildCursorSpawnEnv(bunAny.Bun.env);
             const spawnWithStdin = () => {
                 const child = bunAny.Bun.spawn({
                     cmd: baseCmd,
                     stdin: "pipe",
                     stdout: "pipe",
                     stderr: "pipe",
-                    env: bunAny.Bun.env,
+                    env: spawnEnv,
                 });
                 return {
                     child,
@@ -250,15 +246,7 @@ async function ensureCursorProxyServer(workspaceDirectory) {
             };
             let child;
             let writeInput;
-            try {
-                ({ child, writeInput } = spawnWithStdin());
-            }
-            catch (error) {
-                if (isE2BIGSpawnError(error)) {
-                    throw error;
-                }
-                ({ child, writeInput } = spawnWithArgv());
-            }
+            ({ child, writeInput } = spawnWithStdin());
             if (!stream) {
                 const [stdoutText, stderrText] = await Promise.all([
                     writeInput(),

@@ -168,15 +168,18 @@ function buildToolCallingPrompt(conversation: string, tools: ToolDef[], workspac
   ].join("\n");
 }
 
-function isE2BIGSpawnError(error: unknown): boolean {
-  const code = (error as any)?.code;
-  const message = String((error as any)?.message ?? error ?? "").toLowerCase();
-  return (
-    code === "E2BIG" ||
-    message.includes("e2big") ||
-    message.includes("argument list too long") ||
-    message.includes("posix_spawn")
-  );
+function buildCursorSpawnEnv(source: Record<string, string | undefined>): Record<string, string> {
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (key.startsWith("OPENCODE_")) continue;
+    if (value.length > 8192) continue;
+    output[key] = value;
+  }
+  if (!output.PATH && typeof source.PATH === "string") {
+    output.PATH = source.PATH;
+  }
+  return output;
 }
 
 function createChatCompletionResponse(model: string, content: string) {
@@ -269,28 +272,14 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         "--model",
         selectedModel,
       ];
-      const spawnWithArgv = () => {
-        const cmd = [...baseCmd, effectivePrompt];
-        const child = bunAny.Bun.spawn({
-          cmd,
-          stdout: "pipe",
-          stderr: "pipe",
-          env: bunAny.Bun.env,
-        });
-
-        return {
-          child,
-          writeInput: async () => {},
-        };
-      };
-
+      const spawnEnv = buildCursorSpawnEnv(bunAny.Bun.env as Record<string, string | undefined>);
       const spawnWithStdin = () => {
         const child = bunAny.Bun.spawn({
           cmd: baseCmd,
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
-          env: bunAny.Bun.env,
+          env: spawnEnv,
         });
 
         return {
@@ -311,14 +300,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
 
       let child: any;
       let writeInput: () => Promise<void>;
-      try {
-        ({ child, writeInput } = spawnWithStdin());
-      } catch (error) {
-        if (isE2BIGSpawnError(error)) {
-          throw error;
-        }
-        ({ child, writeInput } = spawnWithArgv());
-      }
+      ({ child, writeInput } = spawnWithStdin());
 
       if (!stream) {
         const [stdoutText, stderrText] = await Promise.all([

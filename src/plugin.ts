@@ -168,6 +168,19 @@ function buildToolCallingPrompt(conversation: string, tools: ToolDef[], workspac
   ].join("\n");
 }
 
+const ARG_PROMPT_MAX_CHARS = 12000;
+
+function isE2BIGSpawnError(error: unknown): boolean {
+  const code = (error as any)?.code;
+  const message = String((error as any)?.message ?? error ?? "").toLowerCase();
+  return (
+    code === "E2BIG" ||
+    message.includes("e2big") ||
+    message.includes("argument list too long") ||
+    message.includes("posix_spawn")
+  );
+}
+
 function createChatCompletionResponse(model: string, content: string) {
   return {
     id: `cursor-agent-${Date.now()}`,
@@ -298,16 +311,21 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         };
       };
 
+      const preferStdin = effectivePrompt.length > ARG_PROMPT_MAX_CHARS;
+
       let child: any;
       let writeInput: () => Promise<void>;
-      try {
-        ({ child, writeInput } = spawnWithArgv());
-      } catch (error) {
-        const code = (error as any)?.code;
-        if (code !== "E2BIG") {
-          throw error;
-        }
+      if (preferStdin) {
         ({ child, writeInput } = spawnWithStdin());
+      } else {
+        try {
+          ({ child, writeInput } = spawnWithArgv());
+        } catch (error) {
+          if (!isE2BIGSpawnError(error)) {
+            throw error;
+          }
+          ({ child, writeInput } = spawnWithStdin());
+        }
       }
 
       if (!stream) {

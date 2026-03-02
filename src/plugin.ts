@@ -257,21 +257,34 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
         workspaceDirectory,
         "--model",
         selectedModel,
-        effectivePrompt,
       ];
 
       const child = bunAny.Bun.spawn({
         cmd,
+        stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
         env: bunAny.Bun.env,
       });
 
+      const stdinWriter = async () => {
+        if (!child.stdin) {
+          return;
+        }
+
+        try {
+          await child.stdin.write(effectivePrompt);
+        } finally {
+          await child.stdin.end();
+        }
+      };
+
       if (!stream) {
         const [stdoutText, stderrText] = await Promise.all([
+          stdinWriter(),
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
-        ]);
+        ]).then(([, stdout, stderr]) => [stdout, stderr]);
 
         const stdout = (stdoutText || "").trim();
         const stderr = (stderrText || "").trim();
@@ -358,9 +371,10 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
               const interval = setInterval(heartbeat, 1000);
 
               const [stdoutText, stderrText] = await Promise.all([
+                stdinWriter(),
                 new Response(child.stdout).text(),
                 new Response(child.stderr).text(),
-              ]).finally(() => {
+              ]).then(([, stdout, stderr]) => [stdout, stderr]).finally(() => {
                 clearInterval(interval);
               });
 
@@ -418,6 +432,7 @@ async function ensureCursorProxyServer(workspaceDirectory: string): Promise<stri
             }
 
             // No tools: stream stdout as text deltas.
+            await stdinWriter();
             const decoder = new TextDecoder();
             const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
 

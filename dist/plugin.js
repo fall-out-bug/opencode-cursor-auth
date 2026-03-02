@@ -128,18 +128,34 @@ function buildToolCallingPrompt(conversation, tools, workspaceDirectory) {
     ].join("\n");
 }
 function buildCursorSpawnEnv(source) {
+    const whitelist = [
+        "PATH",
+        "HOME",
+        "SHELL",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR",
+        "DISPLAY",
+    ];
     const output = {};
-    for (const [key, value] of Object.entries(source)) {
+    for (const key of whitelist) {
+        const value = source[key];
         if (typeof value !== "string" || value.length === 0)
             continue;
-        if (key.startsWith("OPENCODE_"))
-            continue;
-        if (value.length > 8192)
+        if (value.length > 4096)
             continue;
         output[key] = value;
     }
-    if (!output.PATH && typeof source.PATH === "string") {
-        output.PATH = source.PATH;
+    if (!output.PATH) {
+        output.PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    }
+    if (!output.HOME && typeof source.HOME === "string" && source.HOME.length > 0) {
+        output.HOME = source.HOME;
     }
     return output;
 }
